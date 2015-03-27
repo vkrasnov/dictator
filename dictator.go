@@ -6,7 +6,8 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
-	//"sort"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -141,8 +142,8 @@ func (d *dictator) findUncompressable(in []byte) {
 		// Now deflate would output the previous match, therefore if accumulated enough uncompressed bytes, "flush" them
 		if prevLength >= minMatchLength && length <= prevLength {
 			if d.stringLen >= minMatchLength {
-				//fmt.Println(string(d.stringBuf[:d.stringLen]))
-				d.table[string(d.stringBuf[:d.stringLen])]++
+				key := string(d.stringBuf[:d.stringLen])
+				d.table[key]++
 				d.stringLen = 0
 			}
 			newPos := pos + prevLength - 1
@@ -180,7 +181,7 @@ type scoredString struct {
 	score int    // The priority of the item in the queue.
 }
 
-// A PriorityQueue implements heap.Interface and holds Items.
+// A PriorityQueue implements heap.Interface and holds scoredStrings
 type PriorityQueue []*scoredString
 
 func (pq PriorityQueue) Len() int { return len(pq) }
@@ -215,12 +216,14 @@ func main() {
 	pq := make(PriorityQueue, 0)
 	var dictionary string
 
-	path := os.Args[1]
+	dictLen, _ := strconv.Atoi(os.Args[1])
+	path := os.Args[2]
 
 	files, _ := ioutil.ReadDir(path)
+
 	percent := float64(0)
 	for num, f := range files {
-		file, err := os.Open(path + f.Name()) // For read access.
+		file, err := os.Open(path + "/" + f.Name()) // For read access.
 		if err != nil {
 			continue
 		}
@@ -240,11 +243,11 @@ func main() {
 			fmt.Printf("\r%.2f%% ", newPercent)
 		}
 	}
-	fmt.Println()
+	fmt.Println("\r100%%")
 	fmt.Println("Total uncompressible strings found: ", len(table))
-	// If a string appeares in less than 1% of the files, it is useless
+	// If a string appeares in less than 1% of the files, it is probably useless
 	threshold := int(math.Ceil(float64(len(files)) * 0.01))
-	// Remove unique strings, score others
+	// Remove unique strings, score others and put into a heap
 	heap.Init(&pq)
 	for i, v := range table {
 		if v < threshold {
@@ -256,10 +259,18 @@ func main() {
 	}
 	fmt.Println("Uncompressible strings with frequency greater than ", threshold, ": ", len(table))
 
-	for (pq.Len() > 0) && (len(dictionary) < 16384) {
+	// Start poping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
+	for (pq.Len() > 0) && (len(dictionary) < dictLen) {
 		item := heap.Pop(&pq).(*scoredString)
-		dictionary = dictionary + item.value
+		// Ignore strings that already made it to the dictionary, append others in front
+		if !strings.Contains(dictionary, item.value) {
+			dictionary = item.value + dictionary
+		}
 	}
-
-	ioutil.WriteFile(os.Args[2], []byte(dictionary), 0644)
+	// Truncate
+	if len(dictionary) > dictLen {
+		dictionary = dictionary[len(dictionary)-dictLen:]
+	}
+	// Write
+	ioutil.WriteFile(os.Args[3], []byte(dictionary), 0644)
 }
