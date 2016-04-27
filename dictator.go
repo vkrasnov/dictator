@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -208,6 +209,10 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
+func PrintUsage() {
+	fmt.Printf("Usage: %s dictionary_size input_directory output_file\n", path.Base(os.Args[0]))
+}
+
 func main() {
 	var window [16384]byte
 	var d dictator
@@ -215,6 +220,11 @@ func main() {
 	table = make(map[string]int)
 	pq := make(PriorityQueue, 0)
 	var dictionary string
+
+	if len(os.Args) != 4 {
+		PrintUsage()
+		return
+	}
 
 	dictLen, _ := strconv.Atoi(os.Args[1])
 	path := os.Args[2]
