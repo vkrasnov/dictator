@@ -7,12 +7,14 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
-	"path"
-	"strconv"
 	"strings"
 )
 
-var windowSize = flag.Int("windowsize", 16384, "Window size")
+var windowSize = flag.Int("windowsize", 16384, "Window size used by the compression")
+var dictSize = flag.Int("dictsize", 16384, "Maximal size of the generated deflate dictionary")
+var trainDir = flag.String("in", "", "Path to directory with the training data, mandatory")
+var out = flag.String("out", "", "Name of the generated dictionary file, mandatory")
+var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
 
 const (
 	maxMatchLength = 258
@@ -54,14 +56,14 @@ type dictator struct {
 
 func NewDictator(windowSize int) *dictator {
 	dictator := new(dictator)
-	dictator.hashPrev = make([]int, windowSize);
-	dictator.stringBuf = make([]byte, windowSize);
+	dictator.hashPrev = make([]int, windowSize)
+	dictator.stringBuf = make([]byte, windowSize)
 	return dictator
 }
 
 func (d *dictator) init(level int) (err error) {
 	if level < 4 || level > 9 {
-		return fmt.Errorf("Only supposts levels [4, 9], got %d", level)
+		return fmt.Errorf("Only supports levels [4, 9], got %d", level)
 	}
 
 	d.compressionLevel = levels[level]
@@ -180,7 +182,6 @@ func (d *dictator) findUncompressable(in []byte) {
 		}
 	}
 	if d.stringLen > minMatchLength {
-		//fmt.Println(string(d.stringBuf[:d.stringLen]))
 		d.table[string(d.stringBuf[:d.stringLen])]++
 		d.stringLen = 0
 	}
@@ -220,37 +221,35 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 func PrintUsage() {
-	fmt.Printf("Usage: %s [options] dictionary_size input_directory output_file\n", path.Base(os.Args[0]))
 	flag.PrintDefaults()
 }
 
 func main() {
 	flag.Parse()
-	window := make([]byte, *windowSize)
-	d := NewDictator(*windowSize)
-	var table map[string]int
-	table = make(map[string]int)
-	pq := make(PriorityQueue, 0)
-	var dictionary string
 
-	if len(flag.Args()) != 3 {
+	if *trainDir == "" || *out == "" || *compLevel < 4 || *compLevel > 9 {
 		PrintUsage()
 		return
 	}
 
-	dictLen, _ := strconv.Atoi(flag.Arg(0))
-	path := flag.Arg(1)
+	window := make([]byte, *windowSize)
+	d := NewDictator(*windowSize)
+	table := make(map[string]int)
+	pq := make(PriorityQueue, 0)
+	var dictionary string
 
-	files, _ := ioutil.ReadDir(path)
+	dictLen := *dictSize
+
+	files, _ := ioutil.ReadDir(*trainDir)
 
 	percent := float64(0)
 	for num, f := range files {
-		file, err := os.Open(path + "/" + f.Name()) // For read access.
+		file, err := os.Open(*trainDir + "/" + f.Name()) // For read access.
 		if err != nil {
 			continue
 		}
 		count, err := file.Read(window[:len(window)])
-		d.init(4)
+		d.init(*compLevel)
 		// Create a table of all uncompressable strings in the fime
 		d.findUncompressable(window[:count])
 		// Merge with the main table
@@ -265,7 +264,7 @@ func main() {
 			fmt.Printf("\r%.2f%% ", newPercent)
 		}
 	}
-	fmt.Println("\r100%%")
+	fmt.Println("\r100%  ")
 	fmt.Println("Total uncompressible strings found: ", len(table))
 	// If a string appeares in less than 1% of the files, it is probably useless
 	threshold := int(math.Ceil(float64(len(files)) * 0.01))
@@ -294,5 +293,5 @@ func main() {
 		dictionary = dictionary[len(dictionary)-dictLen:]
 	}
 	// Write
-	ioutil.WriteFile(flag.Arg(2), []byte(dictionary), 0644)
+	ioutil.WriteFile(*out, []byte(dictionary), 0644)
 }
