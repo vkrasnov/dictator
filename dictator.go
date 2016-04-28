@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 )
+
+var windowSize = flag.Int("windowsize", 16384, "Window size")
 
 const (
 	maxMatchLength = 258
@@ -41,12 +44,19 @@ type dictator struct {
 	compressionLevel
 	window   []byte
 	hashHead [32768]int
-	hashPrev [16384]int
-	// Accumulate characters emmited as is
-	stringBuf [16384]byte
+	hashPrev []int
+	// Accumulate characters emitted as is
+	stringBuf []byte
 	stringLen int
 	// Count all the strings here
 	table map[string]int
+}
+
+func NewDictator(windowSize int) *dictator {
+	dictator := new(dictator)
+	dictator.hashPrev = make([]int, windowSize);
+	dictator.stringBuf = make([]byte, windowSize);
+	return dictator
 }
 
 func (d *dictator) init(level int) (err error) {
@@ -210,24 +220,26 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 func PrintUsage() {
-	fmt.Printf("Usage: %s dictionary_size input_directory output_file\n", path.Base(os.Args[0]))
+	fmt.Printf("Usage: %s [options] dictionary_size input_directory output_file\n", path.Base(os.Args[0]))
+	flag.PrintDefaults()
 }
 
 func main() {
-	var window [16384]byte
-	var d dictator
+	flag.Parse()
+	window := make([]byte, *windowSize)
+	d := NewDictator(*windowSize)
 	var table map[string]int
 	table = make(map[string]int)
 	pq := make(PriorityQueue, 0)
 	var dictionary string
 
-	if len(os.Args) != 4 {
+	if len(flag.Args()) != 3 {
 		PrintUsage()
 		return
 	}
 
-	dictLen, _ := strconv.Atoi(os.Args[1])
-	path := os.Args[2]
+	dictLen, _ := strconv.Atoi(flag.Arg(0))
+	path := flag.Arg(1)
 
 	files, _ := ioutil.ReadDir(path)
 
@@ -282,5 +294,5 @@ func main() {
 		dictionary = dictionary[len(dictionary)-dictLen:]
 	}
 	// Write
-	ioutil.WriteFile(os.Args[3], []byte(dictionary), 0644)
+	ioutil.WriteFile(flag.Arg(2), []byte(dictionary), 0644)
 }
