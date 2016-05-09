@@ -17,6 +17,7 @@ var dictSize = flag.Int("dictsize", 16384, "Maximal size of the generated deflat
 var trainDir = flag.String("in", "", "Path to directory with the training data, mandatory")
 var out = flag.String("out", "", "Name of the generated dictionary file, mandatory")
 var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
+var concurrency = flag.Int("j", runtime.GOMAXPROCS(0), "The maximum number of CPUs to use")
 
 const (
 	maxMatchLength = 258
@@ -252,15 +253,14 @@ func main() {
 		return
 	}
 
-	concurrency := runtime.GOMAXPROCS(0)
 	files, _ := ioutil.ReadDir(*trainDir)
 	// Channel of tasks to run in parallel.
 	tasks := make(chan string, len(files))
 	// Output channel for tasks.
-	output := make(chan map[string]int, concurrency)
+	output := make(chan map[string]int, *concurrency)
 
 	// Create a worker pool sized to the number of CPUs.
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < *concurrency; i++ {
 		go func() {
 			for path := range tasks {
 				// Create a table of all uncompressable strings in the file.
