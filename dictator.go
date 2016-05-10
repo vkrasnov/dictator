@@ -1,20 +1,12 @@
-package main
+package dictator
 
 import (
 	"container/heap"
-	"flag"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
 	"strings"
 )
-
-var windowSize = flag.Int("windowsize", 16384, "Window size used by the compression")
-var dictSize = flag.Int("dictsize", 16384, "Maximal size of the generated deflate dictionary")
-var trainDir = flag.String("in", "", "Path to directory with the training data, mandatory")
-var out = flag.String("out", "", "Name of the generated dictionary file, mandatory")
-var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
 
 const (
 	maxMatchLength = 258
@@ -129,7 +121,7 @@ func (d *dictator) findMatch(pos int, prevHead int, prevLength int, lookahead in
 	return
 }
 
-func (d *dictator) findUncompressable(in []byte) {
+func (d *dictator) findIncompressible(in []byte) {
 	d.window = in
 	pos := 0
 	length := minMatchLength - 1
@@ -220,57 +212,42 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
-func PrintUsage() {
-	flag.PrintDefaults()
-}
-
-func main() {
-	flag.Parse()
-
-	if *trainDir == "" || *out == "" || *compLevel < 4 || *compLevel > 9 {
-		PrintUsage()
-		return
-	}
-
-	window := make([]byte, *windowSize)
-	d := NewDictator(*windowSize)
-	table := make(map[string]int)
-	pq := make(PriorityQueue, 0)
-	var dictionary string
-
-	dictLen := *dictSize
-
-	files, _ := ioutil.ReadDir(*trainDir)
+func GenerateTable(windowSize int, paths []string, compLevel int, progress chan float64) (table map[string]int) {
+	table = make(map[string]int)
+	window := make([]byte, windowSize)
+	d := NewDictator(windowSize)
 
 	percent := float64(0)
-	for num, f := range files {
-		file, err := os.Open(*trainDir + "/" + f.Name()) // For read access.
+	for num, path := range paths {
+		file, err := os.Open(path) // For read access
 		if err != nil {
 			continue
 		}
+		defer file.Close()
 		count, err := file.Read(window[:len(window)])
-		d.init(*compLevel)
-		// Create a table of all uncompressable strings in the fime
-		d.findUncompressable(window[:count])
+		d.init(compLevel)
+		// Create a table of all incompressible strings in the file
+		d.findIncompressible(window[:count])
 		// Merge with the main table
 		for k, _ := range d.table {
 			table[k]++
 		}
 
-		file.Close()
-
-		if newPercent := float64(num) / float64(len(files)) * 100; (newPercent - percent) >= 1 {
+		if newPercent := float64(num) / float64(len(paths)) * 100; (newPercent - percent) >= 1 {
 			percent = math.Floor(newPercent)
-			fmt.Printf("\r%.2f%% ", newPercent)
+			progress <- newPercent
 		}
 	}
-	fmt.Println("\r100%  ")
-	fmt.Println("Total uncompressible strings found: ", len(table))
-	// If a string appeares in less than 1% of the files, it is probably useless
-	threshold := int(math.Ceil(float64(len(files)) * 0.01))
-	// Remove unique strings, score others and put into a heap
+	close(progress)
+
+	return
+}
+
+func GenerateDictionary(table map[string]int, dictSize int, threshold int) (dictionary string) {
+	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 	for i, v := range table {
+		// Ignore strings that are not present in more than "threshold" files
 		if v < threshold {
 			delete(table, i)
 		} else {
@@ -278,20 +255,20 @@ func main() {
 			heap.Push(&pq, item)
 		}
 	}
-	fmt.Println("Uncompressible strings with frequency greater than ", threshold, ": ", len(table))
 
-	// Start poping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
-	for (pq.Len() > 0) && (len(dictionary) < dictLen) {
+	// Start popping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
+	for (pq.Len() > 0) && (len(dictionary) < dictSize) {
 		item := heap.Pop(&pq).(*scoredString)
 		// Ignore strings that already made it to the dictionary, append others in front
 		if !strings.Contains(dictionary, item.value) {
 			dictionary = item.value + dictionary
 		}
 	}
+
 	// Truncate
-	if len(dictionary) > dictLen {
-		dictionary = dictionary[len(dictionary)-dictLen:]
+	if len(dictionary) > dictSize {
+		dictionary = dictionary[len(dictionary) - dictSize:]
 	}
-	// Write
-	ioutil.WriteFile(*out, []byte(dictionary), 0644)
+
+	return
 }
