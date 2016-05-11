@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -15,6 +17,7 @@ var dictSize = flag.Int("dictsize", 16384, "Maximal size of the generated deflat
 var trainDir = flag.String("in", "", "Path to directory with the training data, mandatory")
 var out = flag.String("out", "", "Name of the generated dictionary file, mandatory")
 var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
+var concurrency = flag.Int("j", runtime.GOMAXPROCS(0), "The maximum number of CPUs to use")
 
 const (
 	maxMatchLength = 258
@@ -224,6 +227,24 @@ func PrintUsage() {
 	flag.PrintDefaults()
 }
 
+func findUncompressableFromFile(path string) (map[string]int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return make(map[string]int), err
+	}
+	defer file.Close()
+	window := make([]byte, *windowSize)
+	count, err := file.Read(window[:len(window)])
+	if err != nil {
+		return make(map[string]int), err
+	}
+	d := NewDictator(*windowSize)
+	d.init(*compLevel)
+	d.findUncompressable(window[:count])
+
+	return d.table, nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -232,43 +253,53 @@ func main() {
 		return
 	}
 
-	window := make([]byte, *windowSize)
-	d := NewDictator(*windowSize)
-	table := make(map[string]int)
-	pq := make(PriorityQueue, 0)
-	var dictionary string
-
-	dictLen := *dictSize
-
 	files, _ := ioutil.ReadDir(*trainDir)
+	// Channel of tasks to run in parallel.
+	tasks := make(chan string, len(files))
+	// Output channel for tasks.
+	output := make(chan map[string]int, *concurrency)
 
+	// Create a worker pool sized to the number of CPUs.
+	for i := 0; i < *concurrency; i++ {
+		go func() {
+			for path := range tasks {
+				// Create a table of all uncompressable strings in the file.
+				table, err := findUncompressableFromFile(path)
+				if err != nil {
+					log.Fatal("Failed to read file:", err)
+				}
+				output <- table
+			}
+		}()
+	}
+
+	for _, f := range files {
+		path := *trainDir + "/" + f.Name()
+		tasks <- path
+	}
+	close(tasks)
+
+	table := make(map[string]int)
 	percent := float64(0)
-	for num, f := range files {
-		file, err := os.Open(*trainDir + "/" + f.Name()) // For read access.
-		if err != nil {
-			continue
-		}
-		count, err := file.Read(window[:len(window)])
-		d.init(*compLevel)
-		// Create a table of all uncompressable strings in the fime
-		d.findUncompressable(window[:count])
-		// Merge with the main table
-		for k, _ := range d.table {
+	// Merge uncompressable strings from all files into one table.
+	for i := 0; i < len(files); i++ {
+		fileTable := <-output
+		for k, _ := range fileTable {
 			table[k]++
 		}
-
-		file.Close()
-
-		if newPercent := float64(num) / float64(len(files)) * 100; (newPercent - percent) >= 1 {
+		if newPercent := float64(i) / float64(len(files)) * 100; (newPercent - percent) >= 1 {
 			percent = math.Floor(newPercent)
 			fmt.Printf("\r%.2f%% ", newPercent)
 		}
 	}
+	close(output)
+
 	fmt.Println("\r100%  ")
 	fmt.Println("Total uncompressible strings found: ", len(table))
 	// If a string appeares in less than 1% of the files, it is probably useless
 	threshold := int(math.Ceil(float64(len(files)) * 0.01))
 	// Remove unique strings, score others and put into a heap
+	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
 	for i, v := range table {
 		if v < threshold {
@@ -279,6 +310,9 @@ func main() {
 		}
 	}
 	fmt.Println("Uncompressible strings with frequency greater than ", threshold, ": ", len(table))
+
+	var dictionary string
+	dictLen := *dictSize
 
 	// Start poping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
 	for (pq.Len() > 0) && (len(dictionary) < dictLen) {
