@@ -3,6 +3,7 @@ package dictator
 import (
 	"container/heap"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"strings"
@@ -212,28 +213,55 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
-func GenerateTable(windowSize int, paths []string, compLevel int, progress chan float64) (table map[string]int) {
-	table = make(map[string]int)
+func findIncompressibleFromFile(path string, windowSize int, compLevel int) (map[string]int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return make(map[string]int), err
+	}
+	defer file.Close()
 	window := make([]byte, windowSize)
+	count, err := file.Read(window[:len(window)])
+	if err != nil {
+		return make(map[string]int), err
+	}
 	d := NewDictator(windowSize)
+	d.init(compLevel)
+	d.findIncompressible(window[:count])
 
+	return d.table, nil
+}
+
+func GenerateTable(windowSize int, paths []string, compLevel int, progress chan float64, concurrency int) (table map[string]int) {
+	tasks := make(chan string, len(paths))
+	output := make(chan map[string]int, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			for path := range tasks {
+				table, err := findIncompressibleFromFile(path, windowSize, compLevel)
+				if err != nil {
+					log.Fatal("Failed to read file:", err)
+				}
+				output <- table
+			}
+		}()
+	}
+
+	for _, path := range paths {
+		tasks <- path
+	}
+	close(tasks)
+
+	table = make(map[string]int)
 	percent := float64(0)
-	for num, path := range paths {
-		file, err := os.Open(path) // For read access
-		if err != nil {
-			continue
-		}
-		defer file.Close()
-		count, err := file.Read(window[:len(window)])
-		d.init(compLevel)
-		// Create a table of all incompressible strings in the file
-		d.findIncompressible(window[:count])
-		// Merge with the main table
-		for k, _ := range d.table {
+
+	for i := 0; i < len(paths); i++ {
+		fileTable := <-output
+		for k, _ := range fileTable {
 			table[k]++
 		}
 
-		if newPercent := float64(num) / float64(len(paths)) * 100; (newPercent - percent) >= 1 {
+		if newPercent := float64(i) / float64(len(paths)) * 100; (newPercent - percent) >= 1 {
 			percent = math.Floor(newPercent)
 			progress <- newPercent
 		}
@@ -258,6 +286,7 @@ func GenerateDictionary(table map[string]int, dictSize int, threshold int) (dict
 
 	// Start popping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
 	for (pq.Len() > 0) && (len(dictionary) < dictSize) {
+
 		item := heap.Pop(&pq).(*scoredString)
 		// Ignore strings that already made it to the dictionary, append others in front
 		if !strings.Contains(dictionary, item.value) {

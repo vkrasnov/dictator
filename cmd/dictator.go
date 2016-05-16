@@ -6,6 +6,7 @@ import (
 	"github.com/vkrasnov/dictator"
 	"io/ioutil"
 	"math"
+	"runtime"
 )
 
 var windowSize = flag.Int("windowsize", 16384, "Window size used by the compression")
@@ -13,6 +14,7 @@ var dictSize = flag.Int("dictsize", 16384, "Maximal size of the generated deflat
 var trainDir = flag.String("in", "", "Path to directory with the training data, mandatory")
 var out = flag.String("out", "", "Name of the generated dictionary file, mandatory")
 var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
+var concurrency = flag.Int("j", runtime.GOMAXPROCS(0), "The maximum number of CPUs to use")
 
 func PrintUsage() {
 	flag.PrintDefaults()
@@ -37,7 +39,7 @@ func main() {
 			fmt.Printf("\r%.2f%% ", percent)
 		}
 	}()
-	table := dictator.GenerateTable(*windowSize, paths, *compLevel, progress)
+	table := dictator.GenerateTable(*windowSize, paths, *compLevel, progress, *concurrency)
 	fmt.Println("\r100%  ")
 	fmt.Println("Total incompressible strings found: ", len(table))
 
