@@ -234,6 +234,7 @@ func findIncompressibleFromFile(path string, windowSize int, compLevel int) (map
 func GenerateTable(windowSize int, paths []string, compLevel int, progress chan float64, concurrency int) (table map[string]int) {
 	tasks := make(chan string, len(paths))
 	output := make(chan map[string]int, concurrency)
+	table = make(map[string]int)
 
 	for i := 0; i < concurrency; i++ {
 		go func() {
@@ -252,7 +253,6 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan 
 	}
 	close(tasks)
 
-	table = make(map[string]int)
 	percent := float64(0)
 
 	for i := 0; i < len(paths); i++ {
