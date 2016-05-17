@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/vkrasnov/dictator"
 	"io/ioutil"
+	"log"
 	"math"
 	"path"
 	"runtime"
@@ -46,5 +47,7 @@ func main() {
 
 	dictionary := dictator.GenerateDictionary(table, *dictSize, int(math.Ceil(float64(len(paths)) * 0.01)))
 
-	ioutil.WriteFile(*out, []byte(dictionary), 0644)
+	if err := ioutil.WriteFile(*out, []byte(dictionary), 0644); err != nil {
+		log.Fatal("Failed to write dictionary:", err)
+	}
 }
