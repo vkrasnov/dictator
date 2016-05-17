@@ -6,6 +6,7 @@ import (
 	"github.com/vkrasnov/dictator"
 	"io/ioutil"
 	"math"
+	"path"
 	"runtime"
 )
 
@@ -31,7 +32,7 @@ func main() {
 	files, _ := ioutil.ReadDir(*trainDir)
 	var paths []string
 	for _, f := range files {
-		paths = append(paths, *trainDir + "/" + f.Name())
+		paths = append(paths, path.Join(*trainDir, f.Name()))
 	}
 	progress := make(chan float64, len(paths))
 	go func() {
