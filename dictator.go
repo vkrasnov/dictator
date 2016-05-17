@@ -231,7 +231,8 @@ func findIncompressibleFromFile(path string, windowSize int, compLevel int) (map
 	return d.table, nil
 }
 
-func GenerateTable(windowSize int, paths []string, compLevel int, progress chan float64, concurrency int) (table map[string]int) {
+// Build a frequency table of incompressible literals from files.
+func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<- float64, concurrency int) (table map[string]int) {
 	tasks := make(chan string, len(paths))
 	output := make(chan map[string]int, concurrency)
 	table = make(map[string]int)
