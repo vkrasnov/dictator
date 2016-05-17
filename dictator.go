@@ -264,7 +264,10 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<
 
 		if newPercent := float64(i) / float64(len(paths)) * 100; (newPercent - percent) >= 1 {
 			percent = math.Floor(newPercent)
-			progress <- newPercent
+			select {
+			case progress <- newPercent:
+			default:
+			}
 		}
 	}
 	close(progress)
