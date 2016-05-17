@@ -231,7 +231,7 @@ func findIncompressibleFromFile(path string, windowSize int, compLevel int) (map
 	return d.table, nil
 }
 
-// Build a frequency table of incompressible literals from files.
+// GenerateTable builds a frequency table of incompressible literals from files.
 func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<- float64, concurrency int) (table map[string]int) {
 	tasks := make(chan string, len(paths))
 	output := make(chan map[string]int, concurrency)
@@ -258,7 +258,7 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<
 
 	for i := 0; i < len(paths); i++ {
 		fileTable := <-output
-		for k, _ := range fileTable {
+		for k := range fileTable {
 			table[k]++
 		}
 
@@ -275,6 +275,7 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<
 	return
 }
 
+// GenerateDictionary builds an LZ77 dictionary from a given frequency table.
 func GenerateDictionary(table map[string]int, dictSize int, threshold int) (dictionary string) {
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)

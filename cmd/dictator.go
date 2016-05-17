@@ -18,7 +18,7 @@ var out = flag.String("out", "", "Name of the generated dictionary file, mandato
 var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
 var concurrency = flag.Int("j", runtime.GOMAXPROCS(0), "The maximum number of CPUs to use")
 
-func PrintUsage() {
+func printUsage() {
 	flag.PrintDefaults()
 }
 
@@ -26,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	if *trainDir == "" || *out == "" || *compLevel < 4 || *compLevel > 9 {
-		PrintUsage()
+		printUsage()
 		return
 	}
 
