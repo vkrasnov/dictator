@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"github.com/vkrasnov/dictator"
 	"io/ioutil"
+	"log"
 	"math"
+	"path"
 	"runtime"
 )
 
@@ -16,7 +18,7 @@ var out = flag.String("out", "", "Name of the generated dictionary file, mandato
 var compLevel = flag.Int("l", 4, "Specify the desired compression level 4-9")
 var concurrency = flag.Int("j", runtime.GOMAXPROCS(0), "The maximum number of CPUs to use")
 
-func PrintUsage() {
+func printUsage() {
 	flag.PrintDefaults()
 }
 
@@ -24,14 +26,14 @@ func main() {
 	flag.Parse()
 
 	if *trainDir == "" || *out == "" || *compLevel < 4 || *compLevel > 9 {
-		PrintUsage()
+		printUsage()
 		return
 	}
 
 	files, _ := ioutil.ReadDir(*trainDir)
 	var paths []string
 	for _, f := range files {
-		paths = append(paths, *trainDir + "/" + f.Name())
+		paths = append(paths, path.Join(*trainDir, f.Name()))
 	}
 	progress := make(chan float64, len(paths))
 	go func() {
@@ -45,5 +47,7 @@ func main() {
 
 	dictionary := dictator.GenerateDictionary(table, *dictSize, int(math.Ceil(float64(len(paths)) * 0.01)))
 
-	ioutil.WriteFile(*out, []byte(dictionary), 0644)
+	if err := ioutil.WriteFile(*out, []byte(dictionary), 0644); err != nil {
+		log.Fatal("Failed to write dictionary:", err)
+	}
 }
