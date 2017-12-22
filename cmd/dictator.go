@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/vkrasnov/dictator"
+	".."
 	"io/ioutil"
 	"log"
 	"math"
