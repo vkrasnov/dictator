@@ -33,6 +33,9 @@ func main() {
 	files, _ := ioutil.ReadDir(*trainDir)
 	var paths []string
 	for _, f := range files {
+		if f.IsDir() || !f.Mode().IsRegular() {
+			continue
+		}
 		paths = append(paths, path.Join(*trainDir, f.Name()))
 	}
 	progress := make(chan float64, len(paths))
