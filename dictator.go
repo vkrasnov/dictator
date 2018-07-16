@@ -10,35 +10,38 @@ import (
 )
 
 const (
-	maxMatchLength = 258
-	minMatchLength = 4
-	hashBits       = 15
-	hashSize       = 1 << hashBits
-	hashMask       = (1 << hashBits) - 1
+	gzipMaxMatchLength = 258
+	brMaxMatchLength   = 16 * 1024 * 1024
+	minMatchLength     = 4
+	hashBits           = 15
+	hashSize           = 1 << hashBits
+	hashMask           = (1 << hashBits) - 1
 )
 
 type compressionLevel struct {
-	good, lazy, nice, chain int
+	good, lazy, nice, chain, max int
 }
 
 var levels = []compressionLevel{
 	{}, // 0
-	{3, 0, 8, 4},
-	{3, 0, 16, 8},
-	{3, 0, 32, 32},
-	{4, 4, 16, 16},
-	{8, 16, 32, 32},
-	{8, 16, 128, 128},
-	{8, 32, 128, 256},
-	{32, 128, 258, 1024},
-	{32, 258, 258, 4096},
+	{3, 0, 8, 4, gzipMaxMatchLength},
+	{3, 0, 16, 8, gzipMaxMatchLength},
+	{3, 0, 32, 32, gzipMaxMatchLength},
+	{4, 4, 16, 16, gzipMaxMatchLength},
+	{8, 16, 32, 32, gzipMaxMatchLength},
+	{8, 16, 128, 128, gzipMaxMatchLength},
+	{8, 32, 128, 256, gzipMaxMatchLength},
+	{32, 128, 258, 1024, gzipMaxMatchLength},
+	{32, 258, 258, 4096, gzipMaxMatchLength},
 }
+
+var brLevel = compressionLevel{32, 1024, 2048, 8192, brMaxMatchLength}
 
 type dictator struct {
 	// Pseudo deflate variables, we need those to perform deflate like matching, to identify strings that are emmited as is
 	compressionLevel
 	window   []byte
-	hashHead [32768]int
+	hashHead [hashSize]int
 	hashPrev []int
 	// Accumulate characters emitted as is
 	stringBuf []byte
@@ -55,11 +58,16 @@ func NewDictator(windowSize int) *dictator {
 }
 
 func (d *dictator) init(level int) (err error) {
-	if level < 4 || level > 9 {
-		return fmt.Errorf("Only supports levels [4, 9], got %d", level)
+
+	switch {
+	case level == 10:
+		d.compressionLevel = brLevel
+	case level >= 4 && level <= 9:
+		d.compressionLevel = levels[level]
+	default:
+		return fmt.Errorf("Only supports levels [4, 9] for gzip, or 10 for brotli, got %d", level)
 	}
 
-	d.compressionLevel = levels[level]
 	d.stringLen = 0
 	d.table = make(map[string]int)
 	for i := range d.hashHead {
@@ -72,7 +80,7 @@ func (d *dictator) init(level int) (err error) {
 // We only look at chainCount possibilities before giving up.
 func (d *dictator) findMatch(pos int, prevHead int, prevLength int, lookahead int) (length, offset int, ok bool) {
 
-	minMatchLook := maxMatchLength
+	minMatchLook := d.max
 	if lookahead < minMatchLook {
 		minMatchLook = lookahead
 	}
@@ -216,17 +224,17 @@ func (pq *PriorityQueue) Pop() interface{} {
 func findIncompressibleFromFile(path string, windowSize int, compLevel int) (map[string]int, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return make(map[string]int), err
+		return nil, err
 	}
 	defer file.Close()
 	window := make([]byte, windowSize)
-	count, err := file.Read(window[:len(window)])
+	n, err := file.Read(window[:len(window)])
 	if err != nil {
-		return make(map[string]int), err
+		return nil, err
 	}
 	d := NewDictator(windowSize)
 	d.init(compLevel)
-	d.findIncompressible(window[:count])
+	d.findIncompressible(window[:n])
 
 	return d.table, nil
 }
@@ -242,7 +250,7 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<
 			for path := range tasks {
 				table, err := findIncompressibleFromFile(path, windowSize, compLevel)
 				if err != nil {
-					log.Fatal("Failed to read file:", err)
+					log.Printf("Failed to read file: %s with error: %s. Skipping.", path, err)
 				}
 				output <- table
 			}
@@ -279,6 +287,7 @@ func GenerateTable(windowSize int, paths []string, compLevel int, progress chan<
 func GenerateDictionary(table map[string]int, dictSize int, threshold int) (dictionary string) {
 	pq := make(PriorityQueue, 0)
 	heap.Init(&pq)
+
 	for i, v := range table {
 		// Ignore strings that are not present in more than "threshold" files
 		if v < threshold {
@@ -289,19 +298,27 @@ func GenerateDictionary(table map[string]int, dictSize int, threshold int) (dict
 		}
 	}
 
+	percent := float64(0)
+	startLen := pq.Len()
+
 	// Start popping strings from the heap. We want the highest scoring closer to the end, so they are encoded with smaller distance value
 	for (pq.Len() > 0) && (len(dictionary) < dictSize) {
-
 		item := heap.Pop(&pq).(*scoredString)
 		// Ignore strings that already made it to the dictionary, append others in front
 		if !strings.Contains(dictionary, item.value) {
 			dictionary = item.value + dictionary
 		}
+
+		if newPercent := math.Max(float64(startLen-pq.Len())/float64(startLen), float64(len(dictionary))/float64(dictSize)) * 100; (newPercent - percent) >= 1 {
+			percent = math.Floor(newPercent)
+			fmt.Printf("\r%.2f%% ", percent)
+		}
 	}
+	fmt.Println("\r100%   ")
 
 	// Truncate
 	if len(dictionary) > dictSize {
-		dictionary = dictionary[len(dictionary) - dictSize:]
+		dictionary = dictionary[len(dictionary)-dictSize:]
 	}
 
 	return
